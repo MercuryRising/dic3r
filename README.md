@@ -16,10 +16,13 @@ Change the following parameters in the first part of the script:
 * Layer height
 * Number of layers to swap
 * Densities (.2 and .9 are defaults) **Currently only supports two infill densities**
+* LinuxCNC / Reprap configs: If using LinuxCNC, use "A" for extruderModifie. If using reprap, use "E".
 
 Find where it is, run
 
-    python splic3r.py PATH_TO_STL_FILE.stl
+    python splic3r.py STL_FILE.stl
+
+It will tell you where the output file is located, and what it is named (STL_FILE_GRADED.gcode)
 
 #### Explanation of how it works:
 
