@@ -19,7 +19,7 @@ Change the following parameters in the first part of the script:
 
 Find where it is, run
 
-  python splic3r.py PATH_TO_STL_FILE.stl
+    python splic3r.py PATH_TO_STL_FILE.stl
 
 #### Explanation of how it works:
 
