@@ -6,25 +6,23 @@ import time
 ################## USER PARAMETERS #####################
 
 # where is your slic3r config file? If you don't know, export it now under the file menu of slic3r
-configFile = "/home/andrew/cnc/files/config.ini"
+configFile = ""
 
 # path to slic3r
-slicerPath = "/home/andrew/cnc/slicer/bin/slic3r"
+slicerPath = ""
 
 # what densities would you like to grade at?
 # first one is the first grade to be printed, second will kick in at the set z
-densities = ['.2', '.9']
+densities = ['.2', '.2']
+fillPatterns = ["concentric", "honeycomb"]
 
 # what is the Z-height you would like to splice the stls at?
 # you have to pick an actual Z height (no approximations)
 # you can pick one from calculating your first layer height + layer heights
-layerHeight = .25
-firstLayerHeight = .35
-layers = 15
+layerHeight = .30
+firstLayerHeight = .30
+layers = 12
 layerSwitchHeight = layers*layerHeight
-
-# Or manually set it
-layerSwitchHeight = 5.100
 
 # if using reprap, 'E', if using linuxCNC, 'A'
 extruderModifier = "A"
@@ -65,9 +63,11 @@ def command_slic3r(filePath):
 	'''
 	sliceStartTime = time.time()
 	files = []
-	for density in densities:
+	for index, density in enumerate(densities):
+		if fillPatterns:
+			fillPattern = fillPatterns[index]
 		print '\nSlicing %s at density %s' %(filePath, density)
-		output = subprocess.check_output([slicerPath, '--load', configFile, '--fill-density', density, filePath])
+		output = subprocess.check_output([slicerPath, '--load', configFile, '--bottom-solid-layers', '0', '--fill-pattern', fillPattern, '--fill-density', density, '--layer-height', str(layerHeight), '--first-layer-height', str(firstLayerHeight), filePath])
 		fileName = re.findall("Exporting G-code to (.*)", output)[0]
 		fileExtension = fileName.split('.')[-1]
 		data = grab_file(fileName)
@@ -153,7 +153,7 @@ if __name__ == '__main__':
 	startTime = time.time()
 
 	if not (configFile and slicerPath):
-		print "Please open the file and enter the path for slic3r and the slic3r config file"
+		print "Please open the script and enter the path for slic3r and the slic3r config file"
 		sys.exit()
 	if len(sys.argv) > 1:
 		if len(sys.argv) > 2:
