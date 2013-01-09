@@ -6,6 +6,9 @@ This script allows you to specify a Z height to change infill densities at.
 If you need to infill a small part of your object at 90% for strength, you need to infill the whole thing at 90%.
 Not anymore!
 
+You can also change infill patterns (start with honeycomb, switch to rectilinear).
+
+
 #### How to use the script
 Clone it or copy the single .py file.
 
@@ -25,7 +28,6 @@ Find where it is, run
 It will tell you where the output file is located, and what it is named (STL_FILE_GRADED.gcode)
 
 #### Explanation of how it works:
-
 This script will splice an stl file at specific densities.
 The densities are calculated with slic3r, meaning each density needs to be sliced separately (automated)
 Currently only two densities are supported
