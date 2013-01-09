@@ -14,6 +14,8 @@ slicerPath = ""
 # what densities would you like to grade at?
 # first one is the first grade to be printed, second will kick in at the set z
 densities = ['.2', '.2']
+
+# Fill patterns - must be 1:1 with density, or a blank array []
 fillPatterns = ["concentric", "honeycomb"]
 
 # what is the Z-height you would like to splice the stls at?
@@ -31,26 +33,6 @@ extruderModifier = "A"
 extension = '.ngc'
 
 #########################################################
-
-'''
-Explanation of how it works:
-
-This script will splice an stl file at specific densities.
-The densities are calculated with slic3r, meaning each density needs to be sliced separately (automated)
-Currently only two densities are supported
-The script finds the last Z height as specified by layerSwitch, and switches over to the other density at that point
-It compensates for the difference in extrusion depending on the difference in fill density
-
-Limitations:
-Currently only works in the Z-dimension.
-I will attempt to add the ability to grade X and Y as well, which would be really nice for something like the money clip bottle opener,
-where only one side needs to have a high fill density (where the bottle is opened), while the other can be springier with less fill.
-
-No logic for finding a 'good' Z. 
-You need to tell it exactly what height to separate at. If you get it wrong, it will slice two (or more) stls, and then crash.
-Feature: Interactive mode for finding new Z heights.
-
-'''
 
 def grab_file(filePath):
 	with open(filePath, 'rb') as f:
