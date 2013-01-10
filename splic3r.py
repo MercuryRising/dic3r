@@ -55,7 +55,9 @@ def command_slic3r(filePath):
 		print '\nSlicing %s at density %s' %(filePath, density)
 		
 		# Call slic3r with command line options
-		output = subprocess.check_output([slicerPath, '--load', configFile, '--gcode-comments', '--bottom-solid-layers', '0', '--fill-pattern', fillPattern, '--fill-density', density, '--layer-height', str(layerHeight), '--first-layer-height', str(firstLayerHeight), filePath])
+		output = subprocess.check_output([slicerPath, '--load', configFile, '--gcode-comments', '--bottom-solid-layers',\
+										 '0', '--fill-pattern', fillPattern, '--fill-density', density, '--layer-height',\
+										  str(layerHeight), '--first-layer-height', str(firstLayerHeight), filePath])
 
 		# Grab the output filename from slic3r
 		fileName = re.findall("Exporting G-code to (.*)", output)[0]
@@ -155,10 +157,48 @@ def splice_gcode(fillA, fillB, sliceTime=None):
 	else:
 		print 'Total time: %.1fs' %(totalTime)
 
+def find_extrema(axis, data):
+	maximum = 0
+	minimum = 9999
+	for line in data.split("\n"):
+		print repr(line)
+		if ";" in line and axis in line and line.index(";") < line.index(axis) or axis not in line:
+			pass
+		else:
+
+			position = re.findall(r"%s([-.0-9]*)" %axis, line)[0]
+			position = float(position)
+			if position > maximum:
+				maximum = position
+			elif position < minimum:
+				minimum = position
+	return maximum, minimum
+
 def gcode_file_splicer(filePath1, filePath2):
 	fillA = grab_file(filePath1)
 	fillB = grab_file(filePath2)
 	splice_gcode(fillA, fillB)
+
+def tiler(stlFilePath):
+	densityData, sliceTime = command_slic3r(stlFilePath)
+	fillA, fillB = densityData
+
+	for data in [fillA]:
+		for axis in ["X", "Y", "Z", "A"]:
+			maximum, minimum = find_extrema(axis, data)
+			print "%s max: %f min: %f" %(axis, maximum, minimum) 
+
+	newB = offset(fillB, find_extrema("X", fillA)[0]+10, "X")
+
+	with open("offsetFile.ngc", "wb") as f:
+		newBLines = newB.split("\n")
+		fillBLines = fillB.split("\n")
+		data = zip(fillBLines, newBLines)
+		data = [A+" | " + B for A,B in data]
+		data = '\n'.join(data)
+		f.write(data)
+
+
 
 def slice_file(stlFilePath):
 	'''
@@ -166,7 +206,21 @@ def slice_file(stlFilePath):
 	'''
 	densityData, sliceTime = command_slic3r(stlFilePath)
 	fillA, fillB = densityData
+
 	splice_gcode(fillA, fillB, sliceTime)
+
+def offset(data, offset, axis):
+	newData = []
+	for line in data.split("\n"):
+		if ";" in line and axis in line and line.index(";") < line.index(axis) or axis not in line:
+			pass
+		else:
+			position = re.findall(r"%s([-.0-9]*)" %axis, line)[0]
+			position = float(position)
+			newPosition = position + offset
+			line = re.sub(axis+str(position), axis+str(newPosition), line)
+		newData.append(line)
+	return '\n'.join(newData)
 
 if __name__ == '__main__':
 	startTime = time.time()
