@@ -6,10 +6,10 @@ import time
 ################## USER PARAMETERS #####################
 
 # where is your slic3r config file? If you don't know, export it now under the file menu of slic3r
-configFile = ""
+configFile = "/home/andrew/cnc/files/config.ini"
 
 # path to slic3r
-slicerPath = ""
+slicerPath = "/home/andrew/cnc/slicer/bin/slic3r"
 
 # what densities would you like to grade at?
 # first one is the first grade to be printed, second will kick in at the set z
@@ -44,66 +44,100 @@ def command_slic3r(filePath):
 	Returns two strings containing the gcode for the infills selected
 	'''
 	sliceStartTime = time.time()
+
+	# We loop through the different infill densities, grabbing the fill patterns when necessary
+	# and command 
 	files = []
+	# Index allows us to grab fill patterns or other properties if they're there, density is the infill density we'll use
 	for index, density in enumerate(densities):
 		if fillPatterns:
 			fillPattern = fillPatterns[index]
 		print '\nSlicing %s at density %s' %(filePath, density)
-		output = subprocess.check_output([slicerPath, '--load', configFile, '--bottom-solid-layers', '0', '--fill-pattern', fillPattern, '--fill-density', density, '--layer-height', str(layerHeight), '--first-layer-height', str(firstLayerHeight), filePath])
+		
+		# Call slic3r with command line options
+		output = subprocess.check_output([slicerPath, '--load', configFile, '--gcode-comments', '--bottom-solid-layers', '0', '--fill-pattern', fillPattern, '--fill-density', density, '--layer-height', str(layerHeight), '--first-layer-height', str(firstLayerHeight), filePath])
+
+		# Grab the output filename from slic3r
 		fileName = re.findall("Exporting G-code to (.*)", output)[0]
+
+		# Grab the extension from the filename
 		fileExtension = fileName.split('.')[-1]
+
+		# Open up the file that slic3r created
 		data = grab_file(fileName)
+
+		# Create a new file path, as when we call slic3r again our original file will be gone
 		newFilePath = filePath[:-4]+'_graded_'+density[1:]+'.'+fileExtension
+
+		# Make the new file
 		with open(newFilePath, 'wb') as f:
 			f.write(data)
 
+		# Save it!
 		print 'Saved %s successfully' %newFilePath
+
+		# Add the data to the list of files
 		files.append(data)
 
 	return files, time.time()-sliceStartTime
 
-def splice_gcode(fill20, fill90, sliceTime=None):
-	layerSwitch = "Z"+str(layerSwitchHeight)
-	fill20Lines = fill20.split("\n")
-	fill90Lines = fill90.split("\n")
+def splice_gcode(fillA, fillB, sliceTime=None):
 
-	line90 = 0
-	while not line90:
-		line90 = re.findall(r"(.*?%s.*)" %layerSwitch, fill90)
-		if not line90:
+	# Convert the decimal height into the correct axis coordinate
+	layerSwitch = "Z"+str(layerSwitchHeight)
+
+	# Convert the data to lines
+	fillALines = fillA.split("\n")
+	fillBLines = fillB.split("\n")
+
+	# lineB and lineA are the lines where the transition will occur
+	# We initialize lineB to 0 to go into 'interactive' mode if the Z-height is not in the file
+	lineB = 0
+	while not lineB:
+		lineB = re.findall(r"(.*?%s.*)" %layerSwitch, fillB)
+		if not lineB:
 			newSwitch = raw_input("\nYour Z didn't work! Enter a new Z height! > ")
 			layerSwitch = "Z"+newSwitch
-	line90 = line90[-1]
 
-	if extruderModifier not in line90:
-		index = fill90Lines.index(line90)
-		a90 = re.findall(r"(%s[-.0-9].*)" %extruderModifier, fill90Lines[index+1])[0]
+	# Grab the last occurrence of the Z height to transition at
+	lineB = lineB[-1]
+
+	# if the line does not have an A/E position in it, we need to find out what the last extruder position was
+	# so we can transition nicely
+	index = fillBLines.index(lineB)
+	while extruderModifier not in lineB:
+		index += 1 
+		testLine = fillBLines[index]
+		aPositionB = re.findall(r"(%s[-.0-9]*)" %extruderModifier, fillBLines[index])[0]
+
 	else:
-		a90 = re.findall(r"(%s[-.0-9].*)" %extruderModifier, line90)[0]
+		aPositionB = re.findall(r"(%s[-.0-9]*)" %extruderModifier, lineB)[0]
 
-	line20 = re.findall(r"(.*?%s.*)" %layerSwitch, fill20)[-1]
+	lineA = re.findall(r"(.*?%s.*)" %layerSwitch,fillA)[-1]
 
-	if extruderModifier not in line20:
-		index = fill20Lines.index(line20)
-		a20 = re.findall(r"(%s[-.0-9].*)" %extruderModifier, fill20Lines[index+1])[0]
+	if extruderModifier not in lineA:
+		index =fillALines.index(lineA)
+		aPositionA = re.findall(r"(%s[-.0-9]*)" %extruderModifier,fillALines[index+1])[0]
 	else:
-		a20 = re.findall(r"(%s[-.0-9].*)" %extruderModifier, line20)[0]
+		aPositionA = re.findall(r"(%s[-.0-9]*)" %extruderModifier, lineA)[0]
 
-	print 'A20 step: ', a20[1:], ' A90step: ', a90[1:]
-	diff = float(a90[1:]) - float(a20[1:]) # offset we need for A steps to add to second file
+	print 'aPositionA step: ', aPositionA[1:], ' aPositionBstep: ', aPositionB[1:]
+	diff = float(aPositionB[1:]) - float(aPositionA[1:]) # offset we need for A steps to add to second file
 	print '\nOffset for densities: ', diff
 
-	firstPart = fill90.split(line90)[0]+line90.strip()+' (end first part)\n'
+	firstPart = fillB.split(lineB)[0]+lineB.strip()+' (end first part)\n'
 
-	secondPart = fill20Lines[fill20Lines.index(line20)+1:]
+	secondPart =fillALines[fillALines.index(lineA)+1:]
 
 	modifiedSecondPart = []
 	for index, line in enumerate(secondPart):
 		if extruderModifier in line:
-			#print line
-			aPosition = re.findall(r"(%s.*)" %extruderModifier, line)[0]
-			newA = float(aPosition[1:])+diff
-			line = re.sub(aPosition, extruderModifier+str(newA)+" (%s)"%aPosition, line)
+			if ";" in line and line.index(";") < line.index("A"): 
+				pass
+			else:
+				aPosition = re.findall(r"(?<!;)(%s[-.0-9]*)" %extruderModifier, line)[0]
+				newA = float(aPosition[1:])+diff
+				line = re.sub(aPosition, extruderModifier+str(newA)+" (%s)"%aPosition, line)
 
 		modifiedSecondPart.append(line)
 
@@ -122,14 +156,17 @@ def splice_gcode(fill20, fill90, sliceTime=None):
 		print 'Total time: %.1fs' %(totalTime)
 
 def gcode_file_splicer(filePath1, filePath2):
-	fill20 = grab_file(filePath1)
-	fill90 = grab_file(filePath2)
-	splice_gcode(fill20, fill90)
+	fillA = grab_file(filePath1)
+	fillB = grab_file(filePath2)
+	splice_gcode(fillA, fillB)
 
 def slice_file(stlFilePath):
+	'''
+	This function slices an STL into separate densities.
+	'''
 	densityData, sliceTime = command_slic3r(stlFilePath)
-	fill20, fill90 = densityData
-	splice_gcode(fill20, fill90, sliceTime)
+	fillA, fillB = densityData
+	splice_gcode(fillA, fillB, sliceTime)
 
 if __name__ == '__main__':
 	startTime = time.time()
