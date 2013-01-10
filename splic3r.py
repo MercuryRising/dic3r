@@ -6,10 +6,10 @@ import time
 ################## USER PARAMETERS #####################
 
 # where is your slic3r config file? If you don't know, export it now under the file menu of slic3r
-configFile = ""
+configFile = "/home/andrew/cnc/files/config.ini"
 
 # path to slic3r
-slicerPath = ""
+slicerPath = "/home/andrew/cnc/Slic3r/bin/slic3r"
 
 # what densities would you like to grade at?
 # first one is the first grade to be printed, second will kick in at the set z
@@ -107,8 +107,8 @@ def splice_gcode(fillA, fillB, sliceTime=None):
 	index = fillBLines.index(lineB)
 	while extruderModifier not in lineB:
 		index += 1 
-		testLine = fillBLines[index]
-		aPositionB = re.findall(r"(%s[-.0-9]*)" %extruderModifier, fillBLines[index])[0]
+		lineB = fillBLines[index]
+		aPositionB = re.findall(r"(%s[-.0-9]*)" %extruderModifier, lineB)[0]
 
 	else:
 		aPositionB = re.findall(r"(%s[-.0-9]*)" %extruderModifier, lineB)[0]
@@ -121,9 +121,9 @@ def splice_gcode(fillA, fillB, sliceTime=None):
 	else:
 		aPositionA = re.findall(r"(%s[-.0-9]*)" %extruderModifier, lineA)[0]
 
-	print 'aPositionA step: ', aPositionA[1:], ' aPositionBstep: ', aPositionB[1:]
+	print 'First extruder position: ', aPositionA[1:], ' Second extruder position: ', aPositionB[1:]
 	diff = float(aPositionB[1:]) - float(aPositionA[1:]) # offset we need for A steps to add to second file
-	print '\nOffset for densities: ', diff
+	print 'Density Offset: ', diff
 
 	firstPart = fillB.split(lineB)[0]+lineB.strip()+' (end first part)\n'
 
@@ -151,7 +151,7 @@ def splice_gcode(fillA, fillB, sliceTime=None):
 	print "You may want to open the file and search for '(end first part)' to ensure everything is sane."
 	totalTime = time.time()-startTime
 	if sliceTime is not None:
-		print 'Total time: %.1fs Slice time: %.1fs Grade time: %.1fs' %(totalTime, sliceTime, totalTime-sliceTime)
+		print 'Total time: %.1fs Slice time: %.1fs Splice time: %.1fs' %(totalTime, sliceTime, totalTime-sliceTime)
 	else:
 		print 'Total time: %.1fs' %(totalTime)
 
