@@ -6,10 +6,10 @@ import time
 ################## USER PARAMETERS #####################
 
 # where is your slic3r config file? If you don't know, export it now under the file menu of slic3r
-configFile = "/home/andrew/cnc/files/config.ini"
+configFile = ""
 
 # path to slic3r
-slicerPath = "/home/andrew/cnc/slicer/bin/slic3r"
+slicerPath = ""
 
 # what densities would you like to grade at?
 # first one is the first grade to be printed, second will kick in at the set z
