@@ -1,16 +1,13 @@
-## Splic3r
-(not related, in any way, to slic3r)
+## Dic3r
 
 ##### What does it do?
-This script allows you to specify a Z height to change infill densities at. 
-If you need to infill a small part of your object at 90% for strength, you need to infill the whole thing at 90%.
-Not anymore!
+Dic3r is designed to be used in conjunction with slic3r. It automates slic3r's command line interface to allow you
+to quickly and easily vary settings.
 
-You can also change infill patterns (start with honeycomb, switch to rectilinear).
-
+This is very useful in machine calibration, when you want to 'dial in' on a certain parameter.
 
 #### How to use the script
-Clone it or copy the single .py file.
+Clone it or copy the single dic3r.py file.
 
 Change the following parameters in the first part of the script:
 * Path to slic3r
@@ -18,23 +15,11 @@ Change the following parameters in the first part of the script:
 * First layer height
 * Layer height
 * Number of layers to swap
-* Densities (.2 and .9 are defaults) **Currently only supports two infill densities**
-* LinuxCNC / Reprap configs: If using LinuxCNC, use "A" for extruderModifie. If using reprap, use "E".
 
 Find where it is, run
 
-    python splic3r.py STL_FILE.stl
+    python splic3r.py STL_FILE.stl 
 
-It will tell you where the output file is located, and what it is named (STL_FILE_GRADED.gcode)
+The script will then ask you some questions about what you would like to calibrate.
 
-#### Explanation of how it works:
-This script will splice an stl file at specific densities.
-The densities are calculated with slic3r, meaning each density needs to be sliced separately (automated)
-Currently only two densities are supported
-The script finds the last Z height as specified by layerSwitch, and switches over to the other density at that point
-It compensates for the difference in extrusion depending on the difference in fill density
-
-#### Limitations:
-Currently only works in the Z-dimension.
-I will attempt to add the ability to grade X and Y as well, which would be really nice for something like the money clip bottle opener,
-where only one side needs to have a high fill density (where the bottle is opened), while the other can be springier with less fill.
+There are currently only two supported: fill-density and extrusion modifier. More coming soon!
