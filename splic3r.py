@@ -1,10 +1,14 @@
+#! /usr/bin/python
+
 import re
 import subprocess
 import sys
 import time
+import numpy as np
+import os
+import random
 
 ################## USER PARAMETERS #####################
-
 # where is your slic3r config file? If you don't know, export it now under the file menu of slic3r
 configFile = ""
 
@@ -31,62 +35,74 @@ extruderModifier = "A"
 
 # preferred extension for spliced file
 extension = '.ngc'
-
 #########################################################
 
 def grab_file(filePath):
 	with open(filePath, 'rb') as f:
 		return f.read()
 
-def command_slic3r(filePath):
+def command_slic3r(filePath, options=None):
 	'''
 	This function makes slic3r slice at the specified infill densities
 	Returns two strings containing the gcode for the infills selected
 	'''
-	sliceStartTime = time.time()
 
 	# We loop through the different infill densities, grabbing the fill patterns when necessary
-	# and command 
+	# and command
 	files = []
 	# Index allows us to grab fill patterns or other properties if they're there, density is the infill density we'll use
-	for index, density in enumerate(densities):
-		if fillPatterns:
-			fillPattern = fillPatterns[index]
-		print '\nSlicing %s at density %s' %(filePath, density)
 		
-		# Call slic3r with command line options
-		output = subprocess.check_output([slicerPath, '--load', configFile, '--gcode-comments', '--bottom-solid-layers',\
-										 '0', '--fill-pattern', fillPattern, '--fill-density', density, '--layer-height',\
-										  str(layerHeight), '--first-layer-height', str(firstLayerHeight), filePath])
+	print '\nSlicing %s with options: %s' %(filePath, options)
 
-		# Grab the output filename from slic3r
-		fileName = re.findall("Exporting G-code to (.*)", output)[0]
+	command = [slicerPath, '--load', configFile, '--gcode-comments', '--layer-height', str(layerHeight), '--first-layer-height', str(firstLayerHeight)]
+	if options:
+		command.extend(options)
+	command.append(filePath)
 
-		# Grab the extension from the filename
-		fileExtension = fileName.split('.')[-1]
+	# Call slic3r with command line options
+	output = subprocess.check_output(command)
 
-		# Open up the file that slic3r created
-		data = grab_file(fileName)
+	# Grab the output filename from slic3r
+	fileName = re.findall("Exporting G-code to (.*)", output)[0]
 
-		# Create a new file path, as when we call slic3r again our original file will be gone
-		newFilePath = filePath[:-4]+'_graded_'+density[1:]+'.'+fileExtension
+	# Grab the extension from the filename
+	fileExtension = fileName.split('.')[-1]
 
-		# Make the new file
-		with open(newFilePath, 'wb') as f:
-			f.write(data)
+	# Open up the file that slic3r created
+	data = grab_file(fileName)
 
-		# Save it!
-		print 'Saved %s successfully' %newFilePath
+	# Create a new file path, as when we call slic3r again our original file will be gone
+	newFilePath = filePath[:-4]+'_graded'+time.strftime("_%H_%M_%S_")+str(random.randint(0,100))+'.'+fileExtension
 
-		# Add the data to the list of files
-		files.append(data)
+	# Make the new file
+	with open(newFilePath, 'wb') as f:
+		f.write(data)
 
-	return files, time.time()-sliceStartTime
+	# Save it!
+	#print 'Saved %s successfully' %newFilePath
 
-def splice_gcode(fillA, fillB, sliceTime=None):
+	return data
+
+def splice_gcode(fillA, fillB, axis, position=0):
+	'''
+	This function splices two files across a boundary.
+	The switching position is determined by the position and the axis
+	defaults to 0.
+	'''
+
+	# add axis logic - Z might be the last one seen at a specific height that is not a retraction
+	# X/Y axes are determined by the line to the point
+	# We have the starting point, and the ending point, 
+	# we need to shorten the line to keep the angles identical
+
+	# For Z, we need a specific height
+
+	# For X/Y, we don't do anything if we end up at a specific height,
+	# but if the coordinate extends past (on infill, skirts, whatever)
+	# we need to shorten the line
 
 	# Convert the decimal height into the correct axis coordinate
-	layerSwitch = "Z"+str(layerSwitchHeight)
+	layerSwitch = axis+str(layerSwitchHeight)
 
 	# Convert the data to lines
 	fillALines = fillA.split("\n")
@@ -112,9 +128,6 @@ def splice_gcode(fillA, fillB, sliceTime=None):
 		lineB = fillBLines[index]
 		aPositionB = re.findall(r"(%s[-.0-9]*)" %extruderModifier, lineB)[0]
 
-	else:
-		aPositionB = re.findall(r"(%s[-.0-9]*)" %extruderModifier, lineB)[0]
-
 	lineA = re.findall(r"(.*?%s.*)" %layerSwitch,fillA)[-1]
 
 	if extruderModifier not in lineA:
@@ -123,12 +136,10 @@ def splice_gcode(fillA, fillB, sliceTime=None):
 	else:
 		aPositionA = re.findall(r"(%s[-.0-9]*)" %extruderModifier, lineA)[0]
 
-	print 'First extruder position: ', aPositionA[1:], ' Second extruder position: ', aPositionB[1:]
 	diff = float(aPositionB[1:]) - float(aPositionA[1:]) # offset we need for A steps to add to second file
-	print 'Density Offset: ', diff
+	print 'Extrusion Offset: ', diff
 
 	firstPart = fillB.split(lineB)[0]+lineB.strip()+' (end first part)\n'
-
 	secondPart =fillALines[fillALines.index(lineA)+1:]
 
 	modifiedSecondPart = []
@@ -140,34 +151,29 @@ def splice_gcode(fillA, fillB, sliceTime=None):
 				aPosition = re.findall(r"(?<!;)(%s[-.0-9]*)" %extruderModifier, line)[0]
 				newA = float(aPosition[1:])+diff
 				line = re.sub(aPosition, extruderModifier+str(newA)+" (%s)"%aPosition, line)
-
 		modifiedSecondPart.append(line)
 
 	data = firstPart + '\n'.join(modifiedSecondPart)
 
-	nfp = stlFilePath[:-4]+"_graded"+extension
-	with open(nfp, "wb") as f:
+	newFilePath = stlFilePath[:-4]+"_graded"+extension
+	with open(newFilePath, "wb") as f:
 		f.write(data)
 
-	print "\nWrote %s successfully" %nfp
+	print "\nWrote %s successfully" %newFilePath
 	print "You may want to open the file and search for '(end first part)' to ensure everything is sane."
 	totalTime = time.time()-startTime
-	if sliceTime is not None:
-		print 'Total time: %.1fs Slice time: %.1fs Splice time: %.1fs' %(totalTime, sliceTime, totalTime-sliceTime)
-	else:
-		print 'Total time: %.1fs' %(totalTime)
+	print 'Total time: %.1fs' %(totalTime)
 
-def find_extrema(axis, data):
+def find_extrema(data, axis):
 	maximum = 0
-	minimum = 9999
+	minimum = 999999
 	for line in data.split("\n"):
-		print repr(line)
 		if ";" in line and axis in line and line.index(";") < line.index(axis) or axis not in line:
 			pass
 		else:
-
 			position = re.findall(r"%s([-.0-9]*)" %axis, line)[0]
 			position = float(position)
+			#print position
 			if position > maximum:
 				maximum = position
 			elif position < minimum:
@@ -177,10 +183,79 @@ def find_extrema(axis, data):
 def gcode_file_splicer(filePath1, filePath2):
 	fillA = grab_file(filePath1)
 	fillB = grab_file(filePath2)
-	splice_gcode(fillA, fillB)
+	splice_gcode(fillA, fillB, "Z", layerHeight*layers+firstLayerHeight)
 
-def tiler(stlFilePath):
-	densityData, sliceTime = command_slic3r(stlFilePath)
+def tiler(stlFilePath, number, option, start, end, offset = 20, maxZ=9999):
+	'''
+	Inputs:
+	stlFilePath - path to STL file to tile
+	number - number of times to repeat stlFile
+	option - slic3r option to grade
+	start - start of range for option
+	end - end of range for option
+	offset - offset for tiles
+	maxZ - if printing large objects and only a few layers are desired, stop at this height
+	maxZ easier to determine with firstLayerHeight + layers*layerHeight
+
+	Outputs:
+	string containing g-code fit to plate size and tiled with number of graded entries
+	'''
+
+	with open(configFile, "rb") as f:
+		configuration = f.readlines()
+
+	bedX, bedY = [line.split("=")[1].strip().split(",") for line in configuration if "bed_size" in line][0]
+	print "Maximum bedx: %s bedy: %s" %(bedX, bedY)
+
+	delta = float((end-start))/float(number)
+
+	variables = np.arange(start, end+delta, delta)
+	variables = [str(var) for var in variables]
+
+	print "Slicing %s at %s" %(option, variables)
+	print "Start: %s End: %s Number: %s" %(start, end, number)
+
+	with open("gCode", "wb") as f:
+		f.write("; split file")
+
+	gCode = os.getcwd() + "/gCode"
+
+	gcodeData = command_slic3r(stlFilePath)
+
+	xSizeMax, xSizeMin = find_extrema(gcodeData, "X")
+	ySizeMax, ySizeMin = find_extrema(gcodeData, "Y")
+	print "MAX: ", xSizeMax, ySizeMax 
+	print_center_x, print_center_y = 20, 20
+
+	tiles = []
+	for index, var in enumerate(variables):
+
+		print_center_x += (index+1)*(xSizeMax+offset)
+
+		if (print_center_x + (xSizeMax/1.7)) > bedX:
+			print "BIGGER THAN BED!"
+			print_center_x = offset+xSizeMax
+			print_center_y += ySizeMax+offset
+
+		print "(x,y): %s, %s Maxes: (%s, %s)" %(print_center_x, print_center_y, xSizeMax, ySizeMax)
+
+		if index == 0:
+			options = [option, var, "--end-gcode", gCode, '--print-center', '%s,%s' %(print_center_x, print_center_y)]
+		elif index < len(variables):
+			options = [option, var, "--start-gcode", gCode, "--end-gcode", gCode, '--print-center', '%s,%s' %(print_center_x, print_center_y)]
+		else:
+			options = [option, var, "--start-gcode", gCode, '--print-center', '%s,%s' %(print_center_x, print_center_y)]
+
+		data = command_slic3r(stlFilePath, options)
+
+		data = offsetter(data, int(index)*offset, "X")
+		tiles.append(data)
+
+	with open("tiled.ngc", "wb") as f:
+		f.write("\n".join(tiles))
+
+	'''
+	densityData = command_slic3r(stlFilePath)
 	fillA, fillB = densityData
 
 	for data in [fillA]:
@@ -188,7 +263,7 @@ def tiler(stlFilePath):
 			maximum, minimum = find_extrema(axis, data)
 			print "%s max: %f min: %f" %(axis, maximum, minimum) 
 
-	newB = offset(fillB, find_extrema("X", fillA)[0]+10, "X")
+	newB = offsetter(fillB, find_extrema("X", fillA)[0]+10, "X")
 
 	with open("offsetFile.ngc", "wb") as f:
 		newBLines = newB.split("\n")
@@ -197,24 +272,31 @@ def tiler(stlFilePath):
 		data = [A+" | " + B for A,B in data]
 		data = '\n'.join(data)
 		f.write(data)
-
+	'''
 def slice_file(stlFilePath):
 	'''
 	This function slices an STL into separate densities.
 	'''
-	densityData, sliceTime = command_slic3r(stlFilePath)
+
+	densityData = command_slic3r(stlFilePath)
 	fillA, fillB = densityData
+	splice_gcode(fillA, fillB, "Z", layerHeight*layers+firstLayerHeight)
 
-	splice_gcode(fillA, fillB, sliceTime)
+def offsetter(data, offset, axis):
+	'''
+	Offsets all coordinates in data corresponding to axis by offset
+	'''
+	offset = float(offset)
 
-def offset(data, offset, axis):
 	newData = []
-	for line in data.split("\n"):
+	for line in data:
 		if ";" in line and axis in line and line.index(";") < line.index(axis) or axis not in line:
 			pass
 		else:
 			position = re.findall(r"%s([-.0-9]*)" %axis, line)[0]
+			print line
 			position = float(position)
+
 			newPosition = position + offset
 			line = re.sub(axis+str(position), axis+str(newPosition), line)
 		newData.append(line)
@@ -227,15 +309,9 @@ if __name__ == '__main__':
 		print "Please open the script and enter the path for slic3r and the slic3r config file"
 		sys.exit()
 	if len(sys.argv) > 1:
-		if len(sys.argv) > 2:
-			firstFile = sys.argv[1]
-			secondFile = sys.argv[2]
-			print 'Using %s and %s as input files...' %(firstFile, secondFile)
-			stlFilePath = firstFile
-			gcode_file_splicer(firstFile, secondFile)
-		else:
-			stlFilePath = sys.argv[1]
-			print 'Using %s as input file...' %stlFilePath
-			slice_file(stlFilePath)
+		stlFilePath = sys.argv[1]
+		print 'Using %s as input file...' %stlFilePath
+		tiler(stlFilePath, 5, "--fill-density", 0, 1)
+		#slice_file(stlFilePath)
 	else:
 		print "Please enter an stl file or gcode(s) to grade"
