@@ -4,9 +4,9 @@ import re
 import subprocess
 import sys
 import time
-import numpy as np
 import os
 import random
+from getopt import getopt
 
 ################## USER PARAMETERS #####################
 # where is your slic3r config file? If you don't know, export it now under the file menu of slic3r
@@ -59,6 +59,8 @@ def command_slic3r(filePath, options=None):
 		command.extend(options)
 	command.append(filePath)
 
+	#print command
+
 	# Call slic3r with command line options
 	output = subprocess.check_output(command)
 
@@ -70,16 +72,6 @@ def command_slic3r(filePath, options=None):
 
 	# Open up the file that slic3r created
 	data = grab_file(fileName)
-
-	# Create a new file path, as when we call slic3r again our original file will be gone
-	newFilePath = filePath[:-4]+'_graded'+time.strftime("_%H_%M_%S_")+str(random.randint(0,100))+'.'+fileExtension
-
-	# Make the new file
-	with open(newFilePath, 'wb') as f:
-		f.write(data)
-
-	# Save it!
-	#print 'Saved %s successfully' %newFilePath
 
 	return data
 
@@ -185,7 +177,7 @@ def gcode_file_splicer(filePath1, filePath2):
 	fillB = grab_file(filePath2)
 	splice_gcode(fillA, fillB, "Z", layerHeight*layers+firstLayerHeight)
 
-def tiler(stlFilePath, number, option, start, end, offset = 20, maxZ=9999):
+def tiler(stlFilePath, option, start, end, number, offset = 10, maxZ=9999):
 	'''
 	Inputs:
 	stlFilePath - path to STL file to tile
@@ -205,12 +197,12 @@ def tiler(stlFilePath, number, option, start, end, offset = 20, maxZ=9999):
 		configuration = f.readlines()
 
 	bedX, bedY = [line.split("=")[1].strip().split(",") for line in configuration if "bed_size" in line][0]
+	bedX, bedY= float(bedX), float(bedY)
 	print "Maximum bedx: %s bedy: %s" %(bedX, bedY)
 
-	delta = float((end-start))/float(number)
+	delta = float((end-start))/float(number-1)
 
-	variables = np.arange(start, end+delta, delta)
-	variables = [str(var) for var in variables]
+	variables = [str(start+index*delta) for index in range(number)]
 
 	print "Slicing %s at %s" %(option, variables)
 	print "Start: %s End: %s Number: %s" %(start, end, number)
@@ -224,22 +216,24 @@ def tiler(stlFilePath, number, option, start, end, offset = 20, maxZ=9999):
 
 	xSizeMax, xSizeMin = find_extrema(gcodeData, "X")
 	ySizeMax, ySizeMin = find_extrema(gcodeData, "Y")
-	print "MAX: ", xSizeMax, ySizeMax 
+
 	print_center_x, print_center_y = 20, 20
 
 	tiles = []
 	for index, var in enumerate(variables):
-
 		print_center_x += (index+1)*(xSizeMax+offset)
-
-		if (print_center_x + (xSizeMax/1.7)) > bedX:
-			print "BIGGER THAN BED!"
+		if (print_center_x + (xSizeMax)/float(2)) > bedX:
 			print_center_x = offset+xSizeMax
 			print_center_y += ySizeMax+offset
+		if print_center_y > bedY:
+			print "Please reduce the number of prints!" 
+			print "Rerun with a smaller number of prints."
+			sys.exit()
 
-		print "(x,y): %s, %s Maxes: (%s, %s)" %(print_center_x, print_center_y, xSizeMax, ySizeMax)
+		print "(x,y): %s and %s Maxes: (%s and %s)" %(print_center_x, print_center_y, xSizeMax, ySizeMax)
 
 		if index == 0:
+
 			options = [option, var, "--end-gcode", gCode, '--print-center', '%s,%s' %(print_center_x, print_center_y)]
 		elif index < len(variables):
 			options = [option, var, "--start-gcode", gCode, "--end-gcode", gCode, '--print-center', '%s,%s' %(print_center_x, print_center_y)]
@@ -250,7 +244,7 @@ def tiler(stlFilePath, number, option, start, end, offset = 20, maxZ=9999):
 
 		data = offsetter(data, int(index)*offset, "X")
 		tiles.append(data)
-
+	print len(tiles)
 	with open("tiled.ngc", "wb") as f:
 		f.write("\n".join(tiles))
 
@@ -287,14 +281,12 @@ def offsetter(data, offset, axis):
 	Offsets all coordinates in data corresponding to axis by offset
 	'''
 	offset = float(offset)
-
 	newData = []
-	for line in data:
+	for line in data.split("\n"):
 		if ";" in line and axis in line and line.index(";") < line.index(axis) or axis not in line:
 			pass
 		else:
 			position = re.findall(r"%s([-.0-9]*)" %axis, line)[0]
-			print line
 			position = float(position)
 
 			newPosition = position + offset
@@ -308,10 +300,58 @@ if __name__ == '__main__':
 	if not (configFile and slicerPath):
 		print "Please open the script and enter the path for slic3r and the slic3r config file"
 		sys.exit()
-	if len(sys.argv) > 1:
+	if len(sys.argv) == 1:
+		print "Please enter an STL to calibrate with!"
+	if len(sys.argv) == 2:
+			tiler(sys.argv[1], "--"+"fill-density", 0, 1, 3)
+	if len(sys.argv) == 3:
 		stlFilePath = sys.argv[1]
-		print 'Using %s as input file...' %stlFilePath
-		tiler(stlFilePath, 5, "--fill-density", 0, 1)
+		print "Welcome to the calibrator!"
+		print "You specify what you want to calibrate, the ranges you calibrate from, and how many calibration pieces you want."
+		print "This tiles your plate with up to however many calibrations will fit."
+
+		print "Your first option: What do you want to calibrate?\n"
+		choice = ''
+		while not choice:
+			options = ["fill-density", "extrusion-multiplier"]
+			for index, option in enumerate(options):
+				print "[%s] %s" %(index, option)
+			selection = raw_input("\nPlease enter an option > ")
+			try:
+				selection = int(selection)
+				choice = options[selection]
+			except:
+				pass
+
+		start = -1
+		while start < 0:
+			start = raw_input("What would you like this parameter to start at? > ")
+			try:
+				start = float(start)
+			except:
+				pass
+		end = ''
+		while not end:
+			end = raw_input("What would you like this parameter to end at? > ")
+			try:
+				end = float(end)
+			except:
+				print "Invalid number!"
+				pass
+
+		number = ''
+		while not number:
+			inp = raw_input("How many do you want in between? >")
+			try:
+				int(inp)
+				if int(inp) > 1:
+					number = int(inp) 
+			except:
+				print "Number must be greater than 1"
+				pass
+
+		print "Generating gcode for %s starting at %s ending at %s broken into %s chunks" %(option, start, end, number)
+		tiler(stlFilePath, "--"+option, start, end, number)
 		#slice_file(stlFilePath)
 	else:
 		print "Please enter an stl file or gcode(s) to grade"
