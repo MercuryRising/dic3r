@@ -52,9 +52,9 @@ def command_slic3r(filePath, options=None):
 	files = []
 	# Index allows us to grab fill patterns or other properties if they're there, density is the infill density we'll use
 		
-	print '\nSlicing %s with options: %s' %(filePath, options)
+	#print '\nSlicing %s with options: %s' %(filePath, options)
 
-	command = [slicerPath, '--load', configFile, '--gcode-comments', '--layer-height', str(layerHeight), '--first-layer-height', str(firstLayerHeight)]
+	command = [slicerPath, '--load', configFile, '--skirts', '0', '--gcode-comments', '--layer-height', str(layerHeight), '--first-layer-height', str(firstLayerHeight)]
 	if options:
 		command.extend(options)
 	command.append(filePath)
@@ -140,7 +140,7 @@ def splice_gcode(fillA, fillB, axis, position=0):
 			if ";" in line and line.index(";") < line.index("A"): 
 				pass
 			else:
-				aPosition = re.findall(r"(?<!;)(%s[-.0-9]*)" %extruderModifier, line)[0]
+				aPosition = re.findall(r"(%s[-.0-9]*)" %extruderModifier, line)[0]
 				newA = float(aPosition[1:])+diff
 				line = re.sub(aPosition, extruderModifier+str(newA)+" (%s)"%aPosition, line)
 		modifiedSecondPart.append(line)
@@ -159,13 +159,13 @@ def splice_gcode(fillA, fillB, axis, position=0):
 def find_extrema(data, axis):
 	maximum = 0
 	minimum = 999999
+
 	for line in data.split("\n"):
 		if ";" in line and axis in line and line.index(";") < line.index(axis) or axis not in line:
 			pass
 		else:
 			position = re.findall(r"%s([-.0-9]*)" %axis, line)[0]
 			position = float(position)
-			#print position
 			if position > maximum:
 				maximum = position
 			elif position < minimum:
@@ -177,7 +177,7 @@ def gcode_file_splicer(filePath1, filePath2):
 	fillB = grab_file(filePath2)
 	splice_gcode(fillA, fillB, "Z", layerHeight*layers+firstLayerHeight)
 
-def tiler(stlFilePath, option, start, end, number, offset = 10, maxZ=9999):
+def tiler(stlFilePath, option, start, end, number, offset=30, maxZ=9999):
 	'''
 	Inputs:
 	stlFilePath - path to STL file to tile
@@ -196,10 +196,17 @@ def tiler(stlFilePath, option, start, end, number, offset = 10, maxZ=9999):
 	with open(configFile, "rb") as f:
 		configuration = f.readlines()
 
-	bedX, bedY = [line.split("=")[1].strip().split(",") for line in configuration if "bed_size" in line][0]
+	bedX, bedY = [line.split("=")[1].strip().split(",") for line in configuration if "bed_size " in line][0]
 	bedX, bedY= float(bedX), float(bedY)
 	print "Maximum bedx: %s bedy: %s" %(bedX, bedY)
 
+	# ; retract_length = 1
+	retractionDistance = [int(line.split("=")[1].strip()) for line in configuration if "retract_length " in line][0]
+	print "Retraction distance: ", retractionDistance
+
+	# ; extrusion_axis = A
+	extrusionAxis = [line.split("=")[1].strip() for line in configuration if "extrusion_axis " in line][0]
+	print "extrusionAxis: ", extrusionAxis
 	delta = float((end-start))/float(number-1)
 
 	variables = [str(start+index*delta) for index in range(number)]
@@ -212,39 +219,60 @@ def tiler(stlFilePath, option, start, end, number, offset = 10, maxZ=9999):
 
 	gCode = os.getcwd() + "/gCode"
 
-	gcodeData = command_slic3r(stlFilePath)
+	gcodeData = command_slic3r(stlFilePath, ['--start-gcode', gCode, '--end-gcode', gCode])
 
-	xSizeMax, xSizeMin = find_extrema(gcodeData, "X")
-	ySizeMax, ySizeMin = find_extrema(gcodeData, "Y")
+	xmax, xmin = find_extrema(gcodeData, "X")
+	ymax, ymin = find_extrema(gcodeData, "Y")
+	
+	xSizeMax = xmax-xmin
+	ySizeMax = ymax-ymin
 
 	print_center_x, print_center_y = 20, 20
+	
+	aPosition = 0
 
 	tiles = []
 	for index, var in enumerate(variables):
-		print_center_x += (index+1)*(xSizeMax+offset)
-		if (print_center_x + (xSizeMax)/float(2)) > bedX:
-			print_center_x = offset+xSizeMax
-			print_center_y += ySizeMax+offset
-		if print_center_y > bedY:
-			print "Please reduce the number of prints!" 
-			print "Rerun with a smaller number of prints."
-			sys.exit()
-
-		print "(x,y): %s and %s Maxes: (%s and %s)" %(print_center_x, print_center_y, xSizeMax, ySizeMax)
+		print "Centering at (x,y): %s and %s Maxes: (%s and %s)" %(print_center_x, print_center_y, xSizeMax, ySizeMax)
 
 		if index == 0:
-
 			options = [option, var, "--end-gcode", gCode, '--print-center', '%s,%s' %(print_center_x, print_center_y)]
-		elif index < len(variables):
+		elif index < len(variables)-1:
 			options = [option, var, "--start-gcode", gCode, "--end-gcode", gCode, '--print-center', '%s,%s' %(print_center_x, print_center_y)]
 		else:
 			options = [option, var, "--start-gcode", gCode, '--print-center', '%s,%s' %(print_center_x, print_center_y)]
 
 		data = command_slic3r(stlFilePath, options)
 
-		data = offsetter(data, int(index)*offset, "X")
+		if index:
+			dataLines = data.split("\n")
+			dataStart = 0
+			for lineFinder, line in enumerate(dataLines):
+				if ("G0" not in line) and ("G1" not in line):
+					continue
+				else:
+					dataStart = lineFinder
+					break
+
+			data = '\n'.join(dataLines[dataStart:])
+
+			extrusionEndPosition, extrusionStart = find_extrema(data, "A")
+			data = offsetter(data, lastExtrusionEnd-retractionDistance, "A")
+
+		lastExtrusionEnd, extrusionStart = find_extrema(data, "A")
+		lastXmax, a = find_extrema(data, "X")
+
 		tiles.append(data)
-	print len(tiles)
+
+		print_center_x = lastXmax+offset
+		if (print_center_x + (xSizeMax)/float(2)) > bedX:
+			print_center_x += offset+lastXmax
+			print_center_y += ySizeMax+offset
+		if print_center_y > bedY:
+			print "Please reduce the number of prints!" 
+			print "Rerun with a smaller number of prints."
+			break
+
 	with open("tiled.ngc", "wb") as f:
 		f.write("\n".join(tiles))
 
@@ -267,6 +295,7 @@ def tiler(stlFilePath, option, start, end, number, offset = 10, maxZ=9999):
 		data = '\n'.join(data)
 		f.write(data)
 	'''
+
 def slice_file(stlFilePath):
 	'''
 	This function slices an STL into separate densities.
@@ -288,7 +317,6 @@ def offsetter(data, offset, axis):
 		else:
 			position = re.findall(r"%s([-.0-9]*)" %axis, line)[0]
 			position = float(position)
-
 			newPosition = position + offset
 			line = re.sub(axis+str(position), axis+str(newPosition), line)
 		newData.append(line)
@@ -300,11 +328,11 @@ if __name__ == '__main__':
 	if not (configFile and slicerPath):
 		print "Please open the script and enter the path for slic3r and the slic3r config file"
 		sys.exit()
-	if len(sys.argv) == 1:
+	elif len(sys.argv) == 1:
 		print "Please enter an STL to calibrate with!"
-	if len(sys.argv) == 2:
+	elif len(sys.argv) == 2:
 			tiler(sys.argv[1], "--"+"fill-density", 0, 1, 3)
-	if len(sys.argv) == 3:
+	elif len(sys.argv) == 3:
 		stlFilePath = sys.argv[1]
 		print "Welcome to the calibrator!"
 		print "You specify what you want to calibrate, the ranges you calibrate from, and how many calibration pieces you want."
