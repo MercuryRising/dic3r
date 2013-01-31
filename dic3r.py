@@ -54,7 +54,7 @@ def command_slic3r(filePath, options=None):
 		
 	#print '\nSlicing %s with options: %s' %(filePath, options)
 
-	command = [slicerPath, '--load', configFile, '--skirts', '0', '--gcode-comments', '--layer-height', str(layerHeight), '--first-layer-height', str(firstLayerHeight)]
+	command = [slicerPath, '--load', configFile, '--gcode-comments', '--layer-height', str(layerHeight), '--first-layer-height', str(firstLayerHeight)]
 	if options:
 		command.extend(options)
 	command.append(filePath)
@@ -177,6 +177,11 @@ def gcode_file_splicer(filePath1, filePath2):
 	fillB = grab_file(filePath2)
 	splice_gcode(fillA, fillB, "Z", layerHeight*layers+firstLayerHeight)
 
+def get_bed_size():
+	with open(configFile, "rb") as f:
+		configuration = f.readlines()
+	return [line.split("=")[1].strip().split(",") for line in configuration if "bed_size " in line][0]
+
 def tiler(stlFilePath, option, start, end, number, offset=30, maxZ=9999):
 	'''
 	Inputs:
@@ -243,7 +248,6 @@ def tiler(stlFilePath, option, start, end, number, offset=30, maxZ=9999):
 			print "Rerun with a smaller number of prints."
 			break
 
-
 		print "Centering at (x,y): %s and %s Maxes: (%s and %s)" %(print_center_x, print_center_y, xSizeMax, ySizeMax)
 
 		if index == 0:
@@ -293,25 +297,6 @@ def tiler(stlFilePath, option, start, end, number, offset=30, maxZ=9999):
 	for var, x, y in centers:
 		print "Param: %.4f (%s, %s)" %(float(var), x, y)
 
-	'''
-	densityData = command_slic3r(stlFilePath)
-	fillA, fillB = densityData
-
-	for data in [fillA]:
-		for axis in ["X", "Y", "Z", "A"]:
-			maximum, minimum = find_extrema(axis, data)
-			print "%s max: %f min: %f" %(axis, maximum, minimum) 
-
-	newB = offsetter(fillB, find_extrema("X", fillA)[0]+10, "X")
-
-	with open("offsetFile.ngc", "wb") as f:
-		newBLines = newB.split("\n")
-		fillBLines = fillB.split("\n")
-		data = zip(fillBLines, newBLines)
-		data = [A+" | " + B for A,B in data]
-		data = '\n'.join(data)
-		f.write(data)
-	'''
 
 def slice_file(stlFilePath):
 	'''
@@ -342,61 +327,127 @@ def offsetter(data, offset, axis):
 if __name__ == '__main__':
 	startTime = time.time()
 
+	#elif len(sys.argv) == 2:
+	#		tiler(sys.argv[1], "--"+"extrusion-multiplier", .9, 1.1, 25)
+	#
+
 	if not (configFile and slicerPath):
 		print "Please open the script and enter the path for slic3r and the slic3r config file"
 		sys.exit()
-	elif len(sys.argv) == 1:
-		print "Please enter an STL to calibrate with!"
-	elif len(sys.argv) == 2:
-			tiler(sys.argv[1], "--"+"extrusion-multiplier", .9, 1.1, 25)
-	elif len(sys.argv) == 3:
-		stlFilePath = sys.argv[1]
-		print "Welcome to the calibrator!"
-		print "You specify what you want to calibrate, the ranges you calibrate from, and how many calibration pieces you want."
-		print "This tiles your plate with up to however many calibrations will fit."
 
+	if True:
+		#stlFilePath = sys.argv[1]
+		print "Welcome to the calibrator!"
 		print "Your first option: What do you want to calibrate?\n"
 		choice = ''
 		while not choice:
-			options = ["fill-density", "extrusion-multiplier"]
+			options = ["bed leveling", "fill density", "extrusion multiplier"]
 			for index, option in enumerate(options):
 				print "[%s] %s" %(index, option)
-			selection = raw_input("\nPlease enter an option > ")
+			selection = raw_input("\nPick something to calibrate > ")
 			try:
 				selection = int(selection)
 				choice = options[selection]
 			except:
 				pass
 
-		start = -1
-		while start < 0:
-			start = raw_input("What would you like this parameter to start at? > ")
-			try:
-				start = float(start)
-			except:
-				pass
-		end = ''
-		while not end:
-			end = raw_input("What would you like this parameter to end at? > ")
-			try:
-				end = float(end)
-			except:
-				print "Invalid number!"
-				pass
+		bedX, bedY = get_bed_size()
+		print_center_x, print_center_y = float(bedX)/2., float(bedY)/2.
 
-		number = ''
-		while not number:
-			inp = raw_input("How many do you want in between? >")
-			try:
-				int(inp)
-				if int(inp) > 1:
-					number = int(inp) 
-			except:
-				print "Number must be greater than 1"
-				pass
 
-		print "Generating gcode for %s starting at %s ending at %s broken into %s chunks" %(option, start, end, number)
-		tiler(stlFilePath, "--"+option, start, end, number)
-		#slice_file(stlFilePath)
-	else:
-		print "Please enter an stl file or gcode(s) to grade"
+		if choice == "bed leveling":
+			numSkirts = 15
+			outputFilename = "bed_calibration"+extension
+			skirtDistance = print_center_x - 10
+			print "\nYour bed is %s by %s, centering at (%s, %s) and printing a skirt %s from the object" %(bedX, bedY, print_center_x, print_center_y, skirtDistance)
+			command_slic3r(os.getcwd()+"/20mm-box.stl", ['--print-center', '%s,%s' %(print_center_x, print_center_y), 
+														 "--skirts", str(numSkirts), 
+														 "--skirt-distance", str(skirtDistance),
+														 "-o", outputFilename])
+			print "Bed leveling with %s skirts, stop your printer when the bed is levelled." %numSkirts
+			print "The output file is located at", outputFilename 
+			
+		elif choice == "fill density":
+			start = -1
+			while start < 0:
+				start = raw_input("What would you like this parameter to start at? > ")
+				try:
+					start = float(start)
+				except:
+					pass
+			end = ''
+			while not end:
+				end = raw_input("What would you like this parameter to end at? > ")
+				try:
+					end = float(end)
+				except:
+					print "Invalid number!"
+					pass
+
+			number = ''
+			while not number:
+				inp = raw_input("How many do you want in between? >")
+				try:
+					int(inp)
+					if int(inp) > 1:
+						number = int(inp) 
+				except:
+					print "Number must be greater than 1"
+					pass
+
+			print "Generating gcode for %s starting at %s ending at %s broken into %s chunks" %(option, start, end, number)
+			tiler(stlFilePath, "--"+option, start, end, number)
+			#slice_file(stlFilePath)
+
+		elif choice == "extrusion multiplier":
+			gotStartingValue = False
+			while not gotStartingValue:
+				startValue = raw_input("Do you want to start at 1? (y or number) > ")
+				if startValue.lower() == "y": 
+					startExtrusion = 1
+					gotStartingValue = True
+				else:
+					try:
+						startExtrusion = float(startValue)
+						gotStartingValue = True
+					except:
+						print "I need a number"
+
+			print "Generating output file now..."
+			outputFilename = "extrusion_multiplier_calibration"+extension
+			extrusion_multiplier = lambda extrusionMultiplier: command_slic3r(os.getcwd()+"/0.5mm-thin-wall.stl", 
+												["--print-center", "%s,%s" %(print_center_x, print_center_y), 
+												 "--extrusion-multiplier", str(extrusionMultiplier),
+												 "--skirts", "2", 
+												 "--skirt-distance", "10",
+												 "-o", outputFilename])
+
+			extrusion_multiplier(startExtrusion)
+
+			print "\nOutput file: %s" %outputFilename
+			print "When you print it, come back and enter the actual thickness of the walls (measured with a caliper), then I'll make you a new file."
+			print "You can type 'q' to quit."
+			while True:
+				actual_thickness = raw_input("\nActual thickness? (in mm)\n(enter multiple numbers and I'll take the average) > ")
+				if actual_thickness.lower() == "q":
+					print "Thanks for  calibrating!"
+					sys.exit()
+				
+				if " " in actual_thickness:
+					numbers = actual_thickness.split(" ")
+					actual_thickness = sum([float(num) for num in numbers])/float(len(numbers))
+					print "The average wall thickness is:", actual_thickness
+
+				try:	
+					actual_thickness = float(actual_thickness)
+					if actual_thickness == 5:
+						print "Right on! You could be done!"
+					else:
+						startExtrusion = 5*startExtrusion/actual_thickness
+						print "The new extrusion multiplier is %s" %startExtrusion
+						print "Generating output now... "
+						extrusion_multiplier(startExtrusion)
+						print "\nOutput file: %s" %outputFilename
+
+				except:
+					print "Need a number..."
